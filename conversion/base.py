@@ -1858,6 +1858,9 @@ class TextModel(ModelBase):
         if chkhsh == "972da7b59cec44d1f0a490a86c96df53859e486e481563e5dddac155013d87ac":
             # ref: https://huggingface.co/poolside/Laguna-XS.2
             res = "laguna"
+        if chkhsh == "acded0362f57dcca1fbdada8d4c87dd782c798cb4c510a70f12a9de6aea57857":
+            # ref: https://huggingface.co/ku-nlp/gpt2-small-japanese-char
+            res = "gpt2-small-japanese-char"
 
         if res is None:
             logger.warning("\n")

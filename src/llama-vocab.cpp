@@ -370,6 +370,7 @@ struct llm_tokenizer_bpe : llm_tokenizer {
                 };
                 break;
             case LLAMA_VOCAB_PRE_TYPE_GPT2:
+            case LLAMA_VOCAB_PRE_TYPE_GPT2_SMALL_JAPANESE_CHAR:
             case LLAMA_VOCAB_PRE_TYPE_MPT:
             case LLAMA_VOCAB_PRE_TYPE_OLMO:
             case LLAMA_VOCAB_PRE_TYPE_JAIS:
@@ -708,7 +709,11 @@ struct llm_tokenizer_bpe_session {
                 const std::string str = std::string(symbol.text, symbol.n);
                 const auto token = vocab.text_to_token(str);
 
-                if (token == LLAMA_TOKEN_NULL) {
+                // U+000A -> U+010A (Ċ) -> [UNK] (line feed, use [SEP] instead)
+                // U+0020 -> U+0120 (Ġ) -> [UNK] (space, use U+3000 instead)
+                if (str == "\u010A" || str == "\u0120") {
+                    output.push_back(vocab.text_to_token("[UNK]"));
+                } else if (token == LLAMA_TOKEN_NULL) {
                     for (auto j = str.begin(); j != str.end(); ++j) {
                         llama_token token_multibyte = LLAMA_TOKEN_NULL;
                         if (tokenizer.byte_encode) {
@@ -1987,6 +1992,11 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
         } else if (tokenizer_model == "gpt2" || tokenizer_model == "hybriddna" || tokenizer_model == "whitespace") {
             type = LLAMA_VOCAB_TYPE_BPE;
 
+            special_unk_id  = 0;
+            special_pad_id  = 1;
+            special_bos_id  = 2;
+            special_eos_id  = 3;
+
             // read bpe merges and populate bpe ranks
             const int merges_keyidx = gguf_find_key(ctx, kv(LLM_KV_TOKENIZER_MERGES).c_str());
             // Kimi-K2 uses custom tokenization without traditional BPE merges
@@ -2023,11 +2033,11 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             }
 
             // default special tokens
-            special_bos_id  = 11;
-            special_eos_id  = 11;
-            special_unk_id  = LLAMA_TOKEN_NULL;
+            // special_bos_id  = 11;
+            // special_eos_id  = 11;
+            // special_unk_id  = LLAMA_TOKEN_NULL;
             special_sep_id  = LLAMA_TOKEN_NULL;
-            special_pad_id  = LLAMA_TOKEN_NULL;
+            // special_pad_id  = LLAMA_TOKEN_NULL;
             special_mask_id = LLAMA_TOKEN_NULL;
         } else if (tokenizer_model == "t5") {
             type = LLAMA_VOCAB_TYPE_UGM;
@@ -2399,6 +2409,9 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             } else if (
                 tokenizer_pre == "mellum2") {
                 pre_type = LLAMA_VOCAB_PRE_TYPE_MELLUM2;
+            } else if (
+                tokenizer_pre == "gpt2-small-japanese-char") {
+                pre_type = LLAMA_VOCAB_PRE_TYPE_GPT2_SMALL_JAPANESE_CHAR;
             } else {
                 throw std::runtime_error(format("unknown pre-tokenizer type: '%s'", tokenizer_pre.c_str()));
             }
@@ -2587,25 +2600,27 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             { LLM_KV_TOKENIZER_MIDDLE_ID, special_fim_mid_id },
         };
 
-        for (const auto & it : special_token_types) {
-            const std::string & key = kv(std::get<0>(it));
-            int32_t & id = std::get<1>(it);
+        if (pre_type != LLAMA_VOCAB_PRE_TYPE_GPT2_SMALL_JAPANESE_CHAR) {
+            for (const auto & it : special_token_types) {
+                const std::string & key = kv(std::get<0>(it));
+                int32_t & id = std::get<1>(it);
 
-            if (id >= 0 && static_cast<size_t>(id) >= id_to_token.size()) {
-                LLAMA_LOG_WARN("%s: default special token '%s' = %d out of vocab range, disabling\n",
-                    __func__, key.c_str(), id);
-                id = LLAMA_TOKEN_NULL;
-            }
+                if (id >= 0 && static_cast<size_t>(id) >= id_to_token.size()) {
+                    LLAMA_LOG_WARN("%s: default special token '%s' = %d out of vocab range, disabling\n",
+                        __func__, key.c_str(), id);
+                    id = LLAMA_TOKEN_NULL;
+                }
 
-            uint32_t new_id;
-            if (!ml.get_key(std::get<0>(it), new_id, false)) {
-                continue;
-            }
-            if (new_id >= id_to_token.size()) {
-                LLAMA_LOG_WARN("%s: bad special token: '%s' = %u, using default id %d\n",
-                    __func__, key.c_str(), new_id, id);
-            } else {
-                id = new_id;
+                uint32_t new_id;
+                if (!ml.get_key(std::get<0>(it), new_id, false)) {
+                    continue;
+                }
+                if (new_id >= id_to_token.size()) {
+                    LLAMA_LOG_WARN("%s: bad special token: '%s' = %u, using default id %d\n",
+                        __func__, key.c_str(), new_id, id);
+                } else {
+                    id = new_id;
+                }
             }
         }
 
