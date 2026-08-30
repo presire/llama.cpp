@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
 #include <cassert>
 #include <algorithm>
 #include <sys/stat.h>
@@ -340,7 +341,21 @@ using compile_count_guard = std::unique_ptr<uint32_t, decltype(&decrement_compil
 compile_count_guard acquire_compile_slot() {
     // wait until fewer than N compiles are in progress.
     // 16 is an arbitrary limit, the goal is to avoid "failed to create pipe" errors.
-    uint32_t N = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+    // The limit can be overridden via the GGML_VULKAN_SHADER_MAX_PARALLEL env var,
+    // which is useful in resource-constrained environments (e.g. CI containers).
+    static const uint32_t N = []() -> uint32_t {
+        const char * env = std::getenv("GGML_VULKAN_SHADER_MAX_PARALLEL");
+        if (env && env[0] != '\0') {
+            char * end = nullptr;
+            errno = 0;
+            const auto v = std::strtoul(env, &end, 10);
+            if (errno == 0 && end != env && *end == '\0' && v >= 1 && v <= 16) {
+                return static_cast<uint32_t>(v);
+            }
+        }
+        return std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+    }();
+
     std::unique_lock<std::mutex> guard(compile_count_mutex);
     compile_count_cond.wait(guard, [N] { return compile_count < N; });
     compile_count++;
