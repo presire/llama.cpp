@@ -3809,6 +3809,47 @@ enum llama_pooling_type llama_pooling_type(const llama_context * ctx) {
     return ctx->pooling_type();
 }
 
+static ggml_backend_reg_t llama_cpu_backend_reg() {
+    auto * cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    return cpu_dev ? ggml_backend_dev_backend_reg(cpu_dev) : nullptr;
+}
+
+ggml_threadpool_t llama_cpu_threadpool_create(int32_t n_threads) {
+    if (n_threads < 1) {
+        return nullptr;
+    }
+
+    auto * reg = llama_cpu_backend_reg();
+    if (!reg) {
+        return nullptr;
+    }
+
+    auto * new_fn = (decltype(ggml_threadpool_new) *) ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_new");
+    if (!new_fn) {
+        return nullptr;
+    }
+
+    auto params = ggml_threadpool_params_default(n_threads);
+    params.poll = 0;
+    return new_fn(&params);
+}
+
+void llama_cpu_threadpool_free(ggml_threadpool_t threadpool) {
+    if (!threadpool) {
+        return;
+    }
+
+    auto * reg = llama_cpu_backend_reg();
+    if (!reg) {
+        return;
+    }
+
+    auto * free_fn = (decltype(ggml_threadpool_free) *) ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_free");
+    if (free_fn) {
+        free_fn(threadpool);
+    }
+}
+
 void llama_attach_threadpool(
             llama_context * ctx,
         ggml_threadpool_t   threadpool,
